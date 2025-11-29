@@ -12,13 +12,14 @@
           Versión: {{ ansible_distribution_version }}
           Gestor de paquetes: {{ ansible_pkg_mgr }}
 
-    - name: 📦 ACTUALIZAR SISTEMA (forzado)
-      package:
+    - name: 📦 ACTUALIZAR SISTEMA (excluyendo zabbix*)
+      dnf:
         name: "*"
         state: latest
-
+        exclude: "zabbix*"
+      
     - name: 🧹 Limpiar cache
-      shell: "{{ ansible_pkg_mgr }} clean all"
+      shell: "dnf clean all"
 
     - name: 📊 Verificar espacio
       shell: df -h
@@ -28,11 +29,17 @@
       debug:
         var: disk_space.stdout
 
-    - name: 🔍 Verificar servicios
+    - name: 🔍 Verificar servicios Zabbix
       systemd:
         name: "{{ item }}"
         state: started
       with_items:
         - zabbix-server
         - zabbix-agent
+        - httpd
+        - mariadb
       ignore_errors: yes
+
+    - name: ✅ FINALIZADO
+      debug:
+        msg: "✅ Mantenimiento completado en {{ ansible_hostname }}"
