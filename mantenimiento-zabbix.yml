@@ -1,0 +1,65 @@
+---
+- name: 🛠️ Mantenimiento Automático - Servidor Zabbix
+  hosts: zabbix_servers
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: 📦 Actualizar sistema (Rocky Linux)
+      yum:
+        name: "*"
+        state: latest
+      when: ansible_distribution == "Rocky"
+
+    - name: 🧹 Limpiar cache de paquetes
+      shell: yum clean all
+      when: ansible_distribution == "Rocky"
+
+    - name: 📊 Verificar espacio en disco
+      shell: df -h
+      register: disk_space
+
+    - name: 📋 Mostrar espacio en disco
+      debug:
+        var: disk_space.stdout
+
+    - name: 🗑️ Limpiar logs antiguos
+      find:
+        paths: /var/log
+        patterns: "*.log.*"
+        age: "7d"
+        file_type: file
+      register: old_logs
+
+    - name: 🗑️ Eliminar logs antiguos
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ old_logs.files }}"
+      when: old_logs.matched > 0
+
+    - name: 🔍 Verificar servicios Zabbix
+      systemd:
+        name: "{{ item }}"
+        state: started
+      with_items:
+        - zabbix-server
+        - zabbix-agent
+        - httpd
+        - mariadb
+      ignore_errors: yes
+
+    - name: 📈 Verificar recursos del sistema
+      shell: |
+        echo "💾 Memoria: $(free -h | grep Mem | awk '{print $3 \"/\" $2}')"
+        echo "💿 Disco: $(df -h / | tail -1 | awk '{print $3 \"/\" $2 \" libre: \" $4}')"
+        echo "🔧 Load: $(uptime | awk -F'load average:' '{print $2}')"
+      register: recursos
+
+    - name: 📋 Mostrar recursos
+      debug:
+        var: recursos.stdout_lines
+
+    - name: ✅ Reporte de finalización
+      debug:
+        msg: "✅ Mantenimiento completado en {{ ansible_hostname }} - {{ ansible_date_time.iso8601 }}"
