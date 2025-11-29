@@ -1,0 +1,11 @@
+all:
+  hosts:
+    windows-server:
+      ansible_host: 192.168.0.40  # ⚠️ REEMPLAZA con la IP real de tu Windows Server
+      ansible_user: administrador
+      ansible_password: Olitec0
+      ansible_connection: ssh
+      ansible_shell_type: cmd
+      ansible_port: 22
+  vars:
+    ansible_shell_type: cmd
