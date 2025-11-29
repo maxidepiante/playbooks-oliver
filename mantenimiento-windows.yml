@@ -1,0 +1,62 @@
+---
+- name: 🛠️ Mantenimiento Automático - Windows Server 2019
+  hosts: windows-server
+  gather_facts: no  # Windows requiere setup específico para facts
+
+  tasks:
+    - name: 📊 Verificar información del sistema
+      win_shell: systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"Total Physical Memory"
+      register: system_info
+
+    - name: 📋 Mostrar información del sistema
+      debug:
+        msg: "{{ system_info.stdout_lines }}"
+
+    - name: 🧹 Limpiar archivos temporales
+      win_shell: |
+        Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "C:\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+      register: cleanup
+
+    - name: 📊 Verificar espacio en disco
+      win_shell: |
+        Get-PSDrive C | Select-Object Name,Used,Free,@{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}},@{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}
+      register: disk_space
+
+    - name: 📋 Mostrar espacio en disco
+      debug:
+        msg: "Espacio en disco C: {{ disk_space.stdout }}"
+
+    - name: 🔍 Verificar servicios críticos
+      win_shell: |
+        Get-Service -Name "Spooler","EventLog","LanmanServer" | Select-Object Name,Status
+      register: services_status
+
+    - name: 📋 Mostrar estado de servicios
+      debug:
+        msg: "Servicios: {{ services_status.stdout }}"
+
+    - name: 🗑️ Limpiar logs antiguos de Event Viewer
+      win_shell: |
+        wevtutil el | ForEach-Object {
+          try {
+            wevtutil cl "$_"
+            Write-Output "Limpiado: $_"
+          } catch {
+            Write-Output "Error limpiando: $_"
+          }
+        }
+      register: event_cleanup
+
+    - name: 🛡️ Verificar updates de seguridad
+      win_shell: |
+        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5
+      register: hotfixes
+
+    - name: 📋 Mostrar últimos updates
+      debug:
+        msg: "Últimos hotfixes: {{ hotfixes.stdout }}"
+
+    - name: ✅ FINALIZADO
+      debug:
+        msg: "✅ Mantenimiento Windows completado en {{ inventory_hostname }}"
