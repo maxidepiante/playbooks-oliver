@@ -1,0 +1,12 @@
+---
+- name: TEST SUPER SIMPLE
+  hosts: zabbix_servers
+  tasks:
+    - debug:
+        msg: "🎉 ESTE MENSAJE DEBERÍA APARECER"
+        
+    - shell: echo "FUNCIONA - $(date)"
+      register: result
+      
+    - debug:
+        var: result.stdout
