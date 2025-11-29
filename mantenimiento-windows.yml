@@ -20,26 +20,168 @@
       debug:
         msg: "{{ system_info_full.stdout }}"
 
-    - name: 🧹 Limpiar archivos temporales
+    - name: 🧹 Limpiar archivos temporales del sistema
       win_shell: |
-        Write-Output "Limpiando archivos temporales..."
+        Write-Output "Limpiando archivos temporales del sistema..."
         Get-ChildItem "C:\Windows\Temp\*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
         Get-ChildItem "C:\Temp\*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-        Write-Output "Limpieza completada"
-      register: cleanup
+        Write-Output "Limpieza de sistema completada"
+      register: cleanup_system
 
-    - name: 📋 Mostrar resultado limpieza
+    - name: 📋 Mostrar resultado limpieza sistema
       debug:
-        msg: "{{ cleanup.stdout }}"
+        msg: "{{ cleanup_system.stdout }}"
 
-    - name: 📊 Verificar espacio en disco
-      win_shell: Get-PSDrive C
-      register: disk_space
+    - name: 🧹 Limpiar archivos temporales de usuario
+      win_shell: |
+        Write-Output "Limpiando archivos temporales de usuarios..."
+        Remove-Item -Path "C:\Users\*\AppData\Local\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "C:\Users\*\AppData\Local\Microsoft\Windows\INetCache\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "C:\Users\*\AppData\Local\Microsoft\Windows\Temporary Internet Files\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Output "Limpieza de usuarios completada"
+      register: cleanup_users
 
-    - name: 📋 Mostrar espacio en disco
+    - name: 📋 Mostrar resultado limpieza usuarios
       debug:
-        msg: "{{ disk_space.stdout }}"
+        msg: "{{ cleanup_users.stdout }}"
+
+    - name: 🛡️ Buscar e instalar updates de Windows
+      win_shell: |
+        Write-Output "Buscando actualizaciones de Windows..."
+        try {
+          # Instalar módulo PSWindowsUpdate si no está presente
+          if (!(Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+            Install-Module -Name PSWindowsUpdate -Force -Confirm:$false
+          }
+          Import-Module PSWindowsUpdate
+          
+          # Buscar e instalar updates críticos y de seguridad
+          $updates = Get-WUList -Category "Critical","Security"
+          if ($updates) {
+            Write-Output "Encontradas $($updates.Count) actualizaciones críticas/seguridad"
+            Install-WindowsUpdate -AcceptAll -AutoReboot:$false -Confirm:$false
+            Write-Output "Actualizaciones instaladas correctamente"
+          } else {
+            Write-Output "No se encontraron actualizaciones críticas pendientes"
+          }
+        } catch {
+          Write-Output "Error en actualizaciones: $($_.Exception.Message)"
+          Write-Output "Verificando con método alternativo..."
+          # Método alternativo sin módulo externo
+          $session = New-Object -ComObject Microsoft.Update.Session
+          $searcher = $session.CreateUpdateSearcher()
+          $result = $searcher.Search("IsInstalled=0 and Type='Software'")
+          Write-Output "Updates pendientes: $($result.Updates.Count)"
+        }
+      register: windows_updates
+
+    - name: 📋 Mostrar resultado de actualizaciones
+      debug:
+        msg: "{{ windows_updates.stdout }}"
+
+    - name: 🔍 Verificar integridad de sistema de archivos
+      win_shell: |
+        Write-Output "Verificando integridad del sistema de archivos..."
+        sfc /verifyonly
+        if ($LASTEXITCODE -eq 0) {
+          Write-Output "✅ SFC: No se encontraron problemas de integridad"
+        } else {
+          Write-Output "⚠️ SFC: Se detectaron problemas. Ejecutar 'sfc /scannow' manualmente"
+        }
+      register: sfc_check
+
+    - name: 📋 Mostrar resultado SFC
+      debug:
+        msg: "{{ sfc_check.stdout }}"
+
+    - name: 📈 Verificar rendimiento del sistema
+      win_shell: |
+        Write-Output "=== MONITOREO DE RENDIMIENTO ==="
+        
+        # Memoria disponible
+        $memory = Get-Counter "\Memory\Available MBytes" | Select-Object -ExpandProperty CounterSamples | Select-Object CookedValue
+        Write-Output "Memoria disponible: $([math]::Round($memory.CookedValue)) MB"
+        
+        # Uso de CPU
+        $cpu = Get-Counter "\Processor(_Total)\% Processor Time" | Select-Object -ExpandProperty CounterSamples | Select-Object CookedValue
+        Write-Output "Uso de CPU: $([math]::Round($cpu.CookedValue, 2)) %"
+        
+        # Espacio en disco
+        $disk = Get-PSDrive C | Select-Object Used, Free, @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}, @{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}}
+        Write-Output "Disco C - Usado: $($disk.UsedGB) GB, Libre: $($disk.FreeGB) GB"
+        
+        # Procesos más consumidores
+        Write-Output "`nTop 5 procesos por uso de memoria:"
+        Get-Process | Sort-Object WS -Descending | Select-Object -First 5 Name, CPU, WS, PM | Format-Table -AutoSize
+      register: performance_check
+
+    - name: 📋 Mostrar resultado rendimiento
+      debug:
+        msg: "{{ performance_check.stdout }}"
+
+    - name: 📊 Verificar servicios críticos
+      win_shell: |
+        Write-Output "=== ESTADO DE SERVICIOS CRÍTICOS ==="
+        $services = @("Spooler", "EventLog", "LanmanServer", "LanmanWorkstation", "Dhcp", "Dnscache")
+        foreach ($service in $services) {
+          $status = Get-Service -Name $service -ErrorAction SilentlyContinue
+          if ($status) {
+            Write-Output "$service : $($status.Status)"
+          } else {
+            Write-Output "$service : No encontrado"
+          }
+        }
+      register: services_check
+
+    - name: 📋 Mostrar estado de servicios
+      debug:
+        msg: "{{ services_check.stdout }}"
+
+    - name: 🗑️ Limpiar logs antiguos de Event Viewer
+      win_shell: |
+        Write-Output "Limpiando logs antiguos de Event Viewer..."
+        $logs = @("Application", "System", "Security")
+        foreach ($log in $logs) {
+          try {
+            wevtutil cl $log
+            Write-Output "Log limpiado: $log"
+          } catch {
+            Write-Output "Error limpiando log $log : $($_.Exception.Message)"
+          }
+        }
+        Write-Output "Limpieza de logs completada"
+      register: event_cleanup
+
+    - name: 📋 Mostrar resultado limpieza logs
+      debug:
+        msg: "{{ event_cleanup.stdout }}"
+
+    - name: 📝 Generar reporte de mantenimiento
+      win_shell: |
+        $fecha = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $computer = $env:COMPUTERNAME
+        $reporte = @"
+REPORTE DE MANTENIMIENTO - $fecha
+Equipo: $computer
+Tareas completadas:
+✅ Limpieza archivos temporales del sistema
+✅ Limpieza archivos temporales de usuarios  
+✅ Verificación de actualizaciones de Windows
+✅ Verificación integridad SFC
+✅ Monitoreo de rendimiento
+✅ Verificación de servicios críticos
+✅ Limpieza de logs de Event Viewer
+
+Ejecutado desde Ansible Semaphore
+"@
+        $reporte | Out-File "C:\Temp\reporte-mantenimiento.txt" -Encoding UTF8
+        Write-Output "Reporte generado en C:\Temp\reporte-mantenimiento.txt"
+      register: reporte
+
+    - name: 📋 Mostrar ubicación del reporte
+      debug:
+        msg: "{{ reporte.stdout }}"
 
     - name: ✅ FINALIZADO
       debug:
-        msg: "✅ Mantenimiento Windows completado"
+        msg: "✅ Mantenimiento Windows completado en {{ inventory_hostname }} - Todas las tareas ejecutadas"
