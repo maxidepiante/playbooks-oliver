@@ -160,20 +160,7 @@
       win_shell: |
         $fecha = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         $computer = $env:COMPUTERNAME
-        $reporte = @"
-REPORTE DE MANTENIMIENTO - $fecha
-Equipo: $computer
-Tareas completadas:
-✅ Limpieza archivos temporales del sistema
-✅ Limpieza archivos temporales de usuarios  
-✅ Verificación de actualizaciones de Windows
-✅ Verificación integridad SFC
-✅ Monitoreo de rendimiento
-✅ Verificación de servicios críticos
-✅ Limpieza de logs de Event Viewer
-
-Ejecutado desde Ansible Semaphore
-"@
+        $reporte = "REPORTE DE MANTENIMIENTO - $fecha`nEquipo: $computer`nTareas completadas:`n✅ Limpieza archivos temporales del sistema`n✅ Limpieza archivos temporales de usuarios`n✅ Verificación de actualizaciones de Windows`n✅ Verificación integridad SFC`n✅ Monitoreo de rendimiento`n✅ Verificación de servicios críticos`n✅ Limpieza de logs de Event Viewer`n`nEjecutado desde Ansible Semaphore"
         $reporte | Out-File "C:\Temp\reporte-mantenimiento.txt" -Encoding UTF8
         Write-Output "Reporte generado en C:\Temp\reporte-mantenimiento.txt"
       register: reporte
