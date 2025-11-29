@@ -5,14 +5,14 @@
 
   tasks:
     - name: 🔍 PRUEBA - Comando simple de test
-      win_shell: echo "✅ Conexión SSH funcionando - {{Get-Date}}"
+      win_shell: echo "✅ Conexión SSH funcionando"
       register: test_cmd
 
     - name: 📋 Mostrar resultado test
       debug:
         msg: "{{ test_cmd.stdout }}"
 
-    - name: 📊 Verificar información del sistema (comando corregido)
+    - name: 📊 Verificar información del sistema
       win_shell: systeminfo
       register: system_info_full
 
@@ -33,8 +33,7 @@
         msg: "{{ cleanup.stdout }}"
 
     - name: 📊 Verificar espacio en disco
-      win_shell: |
-        Get-PSDrive C | Format-List *
+      win_shell: Get-PSDrive C
       register: disk_space
 
     - name: 📋 Mostrar espacio en disco
@@ -43,4 +42,4 @@
 
     - name: ✅ FINALIZADO
       debug:
-        msg: "✅ Mantenimiento Windows completado en {{ inventory_hostname }}"
+        msg: "✅ Mantenimiento Windows completado"
