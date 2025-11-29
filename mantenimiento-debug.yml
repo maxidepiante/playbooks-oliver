@@ -1,0 +1,38 @@
+---
+- name: 🛠️ Mantenimiento Automático - Servidor Zabbix
+  hosts: zabbix_servers
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: 📊 Verificar información del sistema
+      debug:
+        msg: |
+          Distribución: {{ ansible_distribution }}
+          Versión: {{ ansible_distribution_version }}
+          Gestor de paquetes: {{ ansible_pkg_mgr }}
+
+    - name: 📦 ACTUALIZAR SISTEMA (forzado)
+      package:
+        name: "*"
+        state: latest
+
+    - name: 🧹 Limpiar cache
+      shell: "{{ ansible_pkg_mgr }} clean all"
+
+    - name: 📊 Verificar espacio
+      shell: df -h
+      register: disk_space
+
+    - name: 📋 Mostrar espacio
+      debug:
+        var: disk_space.stdout
+
+    - name: 🔍 Verificar servicios
+      systemd:
+        name: "{{ item }}"
+        state: started
+      with_items:
+        - zabbix-server
+        - zabbix-agent
+      ignore_errors: yes
