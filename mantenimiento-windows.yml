@@ -8,18 +8,6 @@
       win_shell: echo "✅ Conexión SSH funcionando"
       register: test_cmd
 
-    - name: 📋 Mostrar resultado test
-      debug:
-        msg: "{{ test_cmd.stdout }}"
-
-    - name: 📊 Verificar información del sistema
-      win_shell: systeminfo
-      register: system_info_full
-
-    - name: 📋 Mostrar información completa del sistema
-      debug:
-        msg: "{{ system_info_full.stdout }}"
-
     - name: 🧹 Limpiar archivos temporales del sistema
       win_shell: |
         Write-Output "Limpiando archivos temporales del sistema..."
@@ -27,10 +15,6 @@
         Get-ChildItem "C:\Temp\*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
         Write-Output "Limpieza de sistema completada"
       register: cleanup_system
-
-    - name: 📋 Mostrar resultado limpieza sistema
-      debug:
-        msg: "{{ cleanup_system.stdout }}"
 
     - name: 🧹 Limpiar archivos temporales de usuario
       win_shell: |
@@ -41,15 +25,11 @@
         Write-Output "Limpieza de usuarios completada"
       register: cleanup_users
 
-    - name: 📋 Mostrar resultado limpieza usuarios
-      debug:
-        msg: "{{ cleanup_users.stdout }}"
-
-    - name: 🛡️ Buscar e instalar updates de Windows (sin reinicio automático)
+    - name: 🛡️ INSTALAR TODOS los updates de Windows (sin reinicio automático)
       win_shell: |
-        Write-Output "=== GESTIÓN DE UPDATES DE WINDOWS ==="
+        Write-Output "=== INSTALACIÓN DE UPDATES (SIN REINICIO AUTOMÁTICO) ==="
         
-        # Método nativo de Windows sin módulos externos
+        # Método nativo de Windows
         $Session = New-Object -ComObject "Microsoft.Update.Session"
         $Searcher = $Session.CreateUpdateSearcher()
         
@@ -66,35 +46,20 @@
             Write-Output " - $($Update.Title)"
         }
         
-        # Filtrar updates que no requieren reinicio (opcional)
-        $UpdatesToInstall = $SearchResult.Updates | Where-Object { $_.Title -notlike "*cumulative*" -and $_.Title -notlike "*servicing stack*" }
+        # INSTALAR TODOS los updates pero SIN reinicio automático
+        Write-Output "Instalando TODOS los updates (sin reinicio automático)..."
+        $Installer = $Session.CreateUpdateInstaller()
+        $Installer.Updates = $SearchResult.Updates
+        $InstallationResult = $Installer.Install()
         
-        if ($UpdatesToInstall.Count -gt 0) {
-            Write-Output "Instalando $($UpdatesToInstall.Count) updates..."
-            $Installer = $Session.CreateUpdateInstaller()
-            $Installer.Updates = $UpdatesToInstall
-            $InstallationResult = $Installer.Install()
-            
-            if ($InstallationResult.ResultCode -eq 2) {
-                Write-Output "✅ Updates instalados correctamente"
-                
-                # Verificar si se requiere reinicio
-                $SystemInfo = New-Object -ComObject "Microsoft.Update.SystemInfo"
-                if ($SystemInfo.RebootRequired) {
-                    Write-Output "🚨 ATENCIÓN: Se requiere REINICIO del sistema"
-                    Write-Output "📋 Por favor programe el reinicio fuera del horario de producción"
-                } else {
-                    Write-Output "✅ No se requiere reinicio"
-                }
-            } else {
-                Write-Output "⚠️ Algunos updates no se pudieron instalar. Código: $($InstallationResult.ResultCode)"
+        if ($InstallationResult.ResultCode -eq 2) {
+            Write-Output "✅ TODOS los updates instalados correctamente"
+            Write-Output "📋 Updates instalados:"
+            foreach ($Update in $SearchResult.Updates) {
+                Write-Output "   - $($Update.Title)"
             }
         } else {
-            Write-Output "ℹ️ Solo updates críticos que requieren reinicio disponibles"
-            Write-Output "🚨 Updates pendientes que requieren reinicio programado:"
-            foreach ($Update in $SearchResult.Updates) {
-                Write-Output " - $($Update.Title)"
-            }
+            Write-Output "⚠️ Algunos updates no se pudieron instalar. Código: $($InstallationResult.ResultCode)"
         }
       register: windows_updates
       ignore_errors: yes
@@ -103,41 +68,55 @@
       debug:
         msg: "{{ windows_updates.stdout }}"
 
-    - name: 🚨 ALERTA - Verificar si se requiere reinicio
+    - name: 🚨 VERIFICAR si se requiere reinicio después de la instalación
       win_shell: |
-        # Métodos para verificar reinicio pendiente
+        Write-Output "=== VERIFICACIÓN DE REINICIO POST-INSTALACIÓN ==="
+        
         $rebootRequired = $false
         $methods = @()
         
-        # Método 1: Component Based Servicing
-        if (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") {
-            $rebootRequired = $true
-            $methods += "Component Based Servicing"
-        }
-        
-        # Método 2: Windows Update
+        # Método 1: Windows Update
         if (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired") {
             $rebootRequired = $true
             $methods += "Windows Update"
         }
         
-        # Método 3: Archivo PendingFileRenameOperations
+        # Método 2: Component Based Servicing
+        if (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending") {
+            $rebootRequired = $true
+            $methods += "Component Based Servicing"
+        }
+        
+        # Método 3: Pending File Rename Operations
         try {
             $pendingRename = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
-            if ($pendingRename) {
+            if ($pendingRename -and $pendingRename.PendingFileRenameOperations -ne $null) {
                 $rebootRequired = $true
                 $methods += "Pending File Rename Operations"
             }
         } catch { }
         
+        # Método 4: WMI
+        try {
+            $wmiReboot = (Get-WmiObject -Class Win32_OperatingSystem).RebootRequired
+            if ($wmiReboot) {
+                $rebootRequired = $true
+                $methods += "WMI"
+            }
+        } catch { }
+        
         if ($rebootRequired) {
-            Write-Output "🚨 REINICIO PENDIENTE REQUERIDO"
-            Write-Output "📋 Métodos que indican reinicio: $($methods -join ', ')"
-            Write-Output "⏰ Por favor programe el reinicio fuera del horario de producción"
+            Write-Output "🚨 ATENCIÓN: REINICIO REQUERIDO después de instalar updates"
+            Write-Output "📋 Métodos que detectan reinicio: $($methods -join ', ')"
+            Write-Output "⏰ Por favor programe el reinicio MANUAL fuera del horario de producción"
             Write-Output "💡 Comando para reiniciar: Restart-Computer -Force"
         } else {
-            Write-Output "✅ No hay reinicios pendientes"
+            Write-Output "✅ No se requiere reinicio - sistema listo para usar"
         }
+        
+        Write-Output "`n=== RESUMEN FINAL ==="
+        Write-Output "Updates instalados: $($SearchResult.Updates.Count)"
+        Write-Output "Reinicio requerido: $(if ($rebootRequired) { 'SI' } else { 'NO' })"
       register: reboot_check
 
     - name: 📋 Mostrar estado de reinicio
@@ -155,40 +134,20 @@
         }
       register: sfc_check
 
-    - name: 📋 Mostrar resultado SFC
-      debug:
-        msg: "{{ sfc_check.stdout }}"
-
     - name: 📈 Verificar rendimiento del sistema
       win_shell: |
         Write-Output "=== MONITOREO DE RENDIMIENTO ==="
         
-        # Memoria disponible
-        $memory = Get-Counter "\Memory\Available MBytes" -ErrorAction SilentlyContinue
-        if ($memory) {
-            $memoryValue = [math]::Round($memory.CounterSamples.CookedValue)
-            Write-Output "Memoria disponible: $memoryValue MB"
-        } else {
-            Write-Output "Memoria disponible: No disponible"
-        }
-        
-        # Uso de CPU
-        $cpu = Get-Counter "\Processor(_Total)\% Processor Time" -ErrorAction SilentlyContinue
-        if ($cpu) {
-            $cpuValue = [math]::Round($cpu.CounterSamples.CookedValue, 2)
-            Write-Output "Uso de CPU: $cpuValue %"
-        } else {
-            Write-Output "Uso de CPU: No disponible"
-        }
-        
         # Espacio en disco
         $disk = Get-PSDrive C | Select-Object Used, Free, @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}, @{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}}
         Write-Output "Disco C - Usado: $($disk.UsedGB) GB, Libre: $($disk.FreeGB) GB"
+        
+        # Memoria
+        $memory = Get-WmiObject Win32_OperatingSystem
+        $freeMemory = [math]::Round($memory.FreePhysicalMemory / 1MB, 2)
+        $totalMemory = [math]::Round($memory.TotalVisibleMemorySize / 1MB, 2)
+        Write-Output "Memoria - Libre: $freeMemory GB, Total: $totalMemory GB"
       register: performance_check
-
-    - name: 📋 Mostrar resultado rendimiento
-      debug:
-        msg: "{{ performance_check.stdout }}"
 
     - name: 📊 Verificar servicios críticos
       win_shell: |
@@ -204,10 +163,6 @@
         }
       register: services_check
 
-    - name: 📋 Mostrar estado de servicios
-      debug:
-        msg: "{{ services_check.stdout }}"
-
     - name: 🗑️ Limpiar logs antiguos de Event Viewer
       win_shell: |
         Write-Output "Limpiando logs antiguos de Event Viewer..."
@@ -222,31 +177,6 @@
         }
         Write-Output "Limpieza de logs completada"
       register: event_cleanup
-
-    - name: 📋 Mostrar resultado limpieza logs
-      debug:
-        msg: "{{ event_cleanup.stdout }}"
-
-    - name: 📝 Generar reporte de mantenimiento
-      win_shell: |
-        $fecha = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        $computer = $env:COMPUTERNAME
-        
-        # Verificar reinicio pendiente
-        $rebootRequired = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-        $rebootStatus = if ($rebootRequired) { "🚨 REINICIO PENDIENTE - Programar fuera de horario producción" } else { "✅ No requiere reinicio" }
-        
-        $reporte = "REPORTE DE MANTENIMIENTO - $fecha`nEquipo: $computer`nEstado Reinicio: $rebootStatus`n`nTareas completadas:`n✅ Limpieza archivos temporales del sistema`n✅ Limpieza archivos temporales de usuarios`n✅ Instalación de updates de Windows`n✅ Verificación integridad SFC`n✅ Monitoreo de rendimiento`n✅ Verificación de servicios críticos`n✅ Limpieza de logs de Event Viewer`n`nEjecutado desde Ansible Semaphore"
-        $reporte | Out-File "C:\Temp\reporte-mantenimiento.txt" -Encoding UTF8
-        Write-Output "Reporte generado en C:\Temp\reporte-mantenimiento.txt"
-        if ($rebootRequired) {
-            Write-Output "ALERTA: $rebootStatus"
-        }
-      register: reporte
-
-    - name: 📋 Mostrar ubicación del reporte
-      debug:
-        msg: "{{ reporte.stdout }}"
 
     - name: ✅ FINALIZADO
       debug:
