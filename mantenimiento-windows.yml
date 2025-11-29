@@ -1,61 +1,45 @@
 ---
 - name: 🛠️ Mantenimiento Automático - Windows Server 2019
   hosts: windows-server
-  gather_facts: no  # Windows requiere setup específico para facts
+  gather_facts: no
 
   tasks:
-    - name: 📊 Verificar información del sistema
-      win_shell: systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"Total Physical Memory"
-      register: system_info
+    - name: 🔍 PRUEBA - Comando simple de test
+      win_shell: echo "✅ Conexión SSH funcionando - {{Get-Date}}"
+      register: test_cmd
 
-    - name: 📋 Mostrar información del sistema
+    - name: 📋 Mostrar resultado test
       debug:
-        msg: "{{ system_info.stdout_lines }}"
+        msg: "{{ test_cmd.stdout }}"
+
+    - name: 📊 Verificar información del sistema (comando corregido)
+      win_shell: systeminfo
+      register: system_info_full
+
+    - name: 📋 Mostrar información completa del sistema
+      debug:
+        msg: "{{ system_info_full.stdout }}"
 
     - name: 🧹 Limpiar archivos temporales
       win_shell: |
-        Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "C:\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Output "Limpiando archivos temporales..."
+        Get-ChildItem "C:\Windows\Temp\*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+        Get-ChildItem "C:\Temp\*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+        Write-Output "Limpieza completada"
       register: cleanup
+
+    - name: 📋 Mostrar resultado limpieza
+      debug:
+        msg: "{{ cleanup.stdout }}"
 
     - name: 📊 Verificar espacio en disco
       win_shell: |
-        Get-PSDrive C | Select-Object Name,Used,Free,@{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}},@{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}
+        Get-PSDrive C | Format-List *
       register: disk_space
 
     - name: 📋 Mostrar espacio en disco
       debug:
-        msg: "Espacio en disco C: {{ disk_space.stdout }}"
-
-    - name: 🔍 Verificar servicios críticos
-      win_shell: |
-        Get-Service -Name "Spooler","EventLog","LanmanServer" | Select-Object Name,Status
-      register: services_status
-
-    - name: 📋 Mostrar estado de servicios
-      debug:
-        msg: "Servicios: {{ services_status.stdout }}"
-
-    - name: 🗑️ Limpiar logs antiguos de Event Viewer
-      win_shell: |
-        wevtutil el | ForEach-Object {
-          try {
-            wevtutil cl "$_"
-            Write-Output "Limpiado: $_"
-          } catch {
-            Write-Output "Error limpiando: $_"
-          }
-        }
-      register: event_cleanup
-
-    - name: 🛡️ Verificar updates de seguridad
-      win_shell: |
-        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5
-      register: hotfixes
-
-    - name: 📋 Mostrar últimos updates
-      debug:
-        msg: "Últimos hotfixes: {{ hotfixes.stdout }}"
+        msg: "{{ disk_space.stdout }}"
 
     - name: ✅ FINALIZADO
       debug:
