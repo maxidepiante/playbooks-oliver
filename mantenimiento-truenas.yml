@@ -1,0 +1,50 @@
+---
+- name: 🛠️ Mantenimiento Automático - TrueNAS Scale Backup Server
+  hosts: truenas_servers  # Grupo específico para TrueNAS
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: 📊 Verificar información del sistema
+      debug:
+        msg: |
+          Servidor: {{ ansible_hostname }}
+          TrueNAS Scale
+          IP: 192.168.0.144
+          Propósito: Repositorio backups VMs y BD Oliver
+
+    - name: 📈 Verificar pools ZFS
+      shell: zpool list -H -o name,size,alloc,free,health
+      register: zpool_info
+
+    - name: 📋 Mostrar estado pools ZFS
+      debug:
+        msg: "{{ zpool_info.stdout_lines }}"
+
+    - name: 🔍 Verificar espacio del sistema
+      shell: df -h
+      register: disk_space
+
+    - name: 📋 Mostrar espacio en disco
+      debug:
+        var: disk_space.stdout
+
+    - name: 🧹 Limpiar logs antiguos (7+ días)
+      shell: |
+        find /var/log -name "*.log" -type f -mtime +7 -delete
+        echo "Logs antiguos limpiados"
+      args:
+        warn: no
+
+    - name: 🔄 Verificar servicios críticos
+      systemd:
+        name: "{{ item }}"
+        state: started
+      with_items:
+        - sshd
+        - middlewared
+      ignore_errors: yes
+
+    - name: ✅ FINALIZADO
+      debug:
+        msg: "✅ Mantenimiento TrueNAS completado en {{ ansible_hostname }}"
