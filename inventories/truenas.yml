@@ -1,0 +1,27 @@
+# Inventario para TrueNAS Scale - Oliver Backup Server
+# Grupo: truenas_servers (usado en el playbook)
+
+all:
+  children:
+    truenas_servers:  # ← GRUPO que referencia el playbook
+      hosts:
+        truenas-oliver-backup:  # ← Nombre descriptivo del host
+          ansible_host: 192.168.0.144
+          ansible_user: root
+          ansible_connection: ssh
+          ansible_port: 22
+          ansible_ssh_private_key: "{{ TRUENAS_SSH_PRIVATE_KEY }}"
+          ansible_become: yes
+          ansible_python_interpreter: /usr/bin/python3
+          
+          # Metadatos para documentación
+          server_name: "TrueNAS Scale Backup"
+          server_purpose: "Almacena backups de VMs y Base de datos de Oliver"
+          server_location: "onprem"
+          server_type: "baremetal"
+          
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    # Variables específicas de TrueNAS
+    log_retention_days: 7
+    zfs_health_check: true
