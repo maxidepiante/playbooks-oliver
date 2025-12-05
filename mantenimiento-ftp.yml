@@ -1,0 +1,209 @@
+---
+- name: 🛠️ Mantenimiento Servidor FTP Windows 2016 - Oliver Backups
+  hosts: oliftp-windows
+  gather_facts: no
+
+  tasks:
+    - name: 📊 1. INFORMACIÓN DEL SISTEMA
+      win_command: systeminfo
+      register: system_info
+
+    - name: 📋 Mostrar información básica
+      debug:
+        msg: |
+          🖥️  Servidor FTP: {{ inventory_hostname }}
+          🔧 Sistema: Windows Server 2016 Standard  
+          🌐 IP: 192.168.0.36
+          🎯 Propósito: Repositorio backups Cobian
+          📅 Fecha: {{ ansible_date_time.date }}
+
+    - name: 💿 2. ANÁLISIS DE DISCOS
+      win_shell: |
+        Write-Output "=== ANÁLISIS DE DISCOS ==="
+        Get-PSDrive -PSProvider FileSystem | 
+        Select-Object Name,
+          @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}},
+          @{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}},
+          @{Name="TotalGB";Expression={[math]::Round(($_.Used + $_.Free)/1GB,2)}}
+      register: disk_analysis
+
+    - name: 📋 Mostrar estado discos
+      debug:
+        msg: "{{ disk_analysis.stdout }}"
+
+    - name: 🔍 3. BUSCAR DIRECTORIOS DE BACKUP
+      win_shell: |
+        Write-Output "=== BUSQUEDA DE DIRECTORIOS BACKUP ==="
+        
+        # Buscar en todos los discos
+        $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+        $backupPatterns = @("*backup*", "*cobian*", "*Backup*", "*Cobian*", "*bkp*", "*BKP*")
+        $foundBackups = @()
+        
+        foreach ($drive in $drives) {
+          if (Test-Path $drive) {
+            foreach ($pattern in $backupPatterns) {
+              $dirs = Get-ChildItem -Path $drive -Directory -Filter $pattern -ErrorAction SilentlyContinue
+              if ($dirs) {
+                $foundBackups += $dirs
+              }
+            }
+          }
+        }
+        
+        if ($foundBackups.Count -gt 0) {
+          Write-Output "✅ Directorios de backup encontrados:"
+          foreach ($dir in $foundBackups) {
+            Write-Output "   • $($dir.FullName)"
+          }
+        } else {
+          Write-Output "ℹ️ No se encontraron directorios con nombres de backup"
+          Write-Output "Directorios en raíz de discos:"
+          foreach ($drive in $drives) {
+            if (Test-Path $drive) {
+              $topDirs = Get-ChildItem -Path $drive -Directory -ErrorAction SilentlyContinue | 
+                        Select-Object -First 3 Name
+              if ($topDirs) {
+                Write-Output "   $drive : $($topDirs.Name -join ', ')"
+              }
+            }
+          }
+        }
+      register: backup_search
+      changed_when: false
+
+    - name: 📋 Mostrar resultados búsqueda
+      debug:
+        msg: "{{ backup_search.stdout }}"
+
+    - name: 🧹 4. LIMPIEZA DE ARCHIVOS TEMPORALES
+      win_shell: |
+        Write-Output "=== LIMPIEZA DE ARCHIVOS TEMPORALES ==="
+        
+        $tempPaths = @(
+          "C:\Windows\Temp",
+          "C:\Temp", 
+          "$env:TEMP"
+        )
+        
+        $totalDeleted = 0
+        $totalFreedMB = 0
+        
+        foreach ($path in $tempPaths) {
+          if (Test-Path $path) {
+            $oldFiles = Get-ChildItem -Path $path -Recurse -File -ErrorAction SilentlyContinue | 
+                      Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-{{ temp_cleanup_days }}) }
+            
+            if ($oldFiles.Count -gt 0) {
+              $sizeMB = [math]::Round(($oldFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+              Write-Output "Limpiando $($oldFiles.Count) archivos de $path ($sizeMB MB)..."
+              $oldFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+              $totalDeleted += $oldFiles.Count
+              $totalFreedMB += $sizeMB
+            }
+          }
+        }
+        
+        Write-Output "✅ Total: $totalDeleted archivos limpiados ($totalFreedMB MB liberados)"
+      register: temp_cleanup
+      changed_when: "temp_cleanup.stdout is search('archivos limpiados')"
+
+    - name: 📋 Mostrar resultado limpieza
+      debug:
+        msg: "{{ temp_cleanup.stdout }}"
+
+    - name: 🔧 5. VERIFICACIÓN DE SERVICIOS CRÍTICOS
+      win_shell: |
+        Write-Output "=== VERIFICACIÓN DE SERVICIOS ==="
+        
+        # Servicios esenciales de Windows
+        $services = @(
+          @{Name="Spooler"; Desc="Servicio de impresión"},
+          @{Name="EventLog"; Desc="Registro de eventos"},
+          @{Name="LanmanServer"; Desc="Servidor SMB"},
+          @{Name="LanmanWorkstation"; Desc="Cliente SMB"},
+          @{Name="Dhcp"; Desc="Cliente DHCP"},
+          @{Name="Dnscache"; Desc="Cliente DNS"}
+        )
+        
+        foreach ($svc in $services) {
+          $status = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
+          if ($status) {
+            $icon = if ($status.Status -eq "Running") { "✅" } else { "⚠️" }
+            Write-Output "$icon $($svc.Name) : $($status.Status)"
+          }
+        }
+      register: service_check
+      changed_when: false
+
+    - name: 📋 Mostrar estado servicios
+      debug:
+        msg: "{{ service_check.stdout }}"
+
+    - name: 📝 6. GENERAR REPORTE LOCAL
+      win_shell: |
+        $dateStr = Get-Date -Format "yyyy-MM-dd"
+        $reportPath = "C:\Temp\reporte-ftp-$dateStr.txt"
+        
+        # Información básica
+        $computerName = $env:COMPUTERNAME
+        $disks = Get-PSDrive -PSProvider FileSystem | 
+                Select-Object Name, 
+                  @{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}},
+                  @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}
+        
+        # Generar reporte
+        @"
+=== REPORTE MANTENIMIENTO FTP SERVER ===
+Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+Servidor: $computerName
+IP: 192.168.0.36
+Sistema: Windows Server 2016 Standard
+
+=== ESTADO DEL SISTEMA ===
+Discos disponibles:
+$($disks | Format-Table | Out-String)
+
+=== MANTENIMIENTO EJECUTADO ===
+- Análisis de espacio en discos
+- Búsqueda de directorios de backup
+- Limpieza de archivos temporales (>{{ temp_cleanup_days }} días)
+- Verificación de servicios críticos
+
+=== RECOMENDACIONES ===
+1. Monitorear espacio libre regularmente
+2. Verificar backups automáticos de Cobian
+3. Revisar logs del sistema periódicamente
+
+Reporte generado automáticamente por Ansible Semaphore
+"@ | Out-File -FilePath $reportPath -Encoding UTF8
+        
+        Write-Output "📄 Reporte generado en: $reportPath"
+      register: report_generation
+      changed_when: false
+
+    - name: 📋 Mostrar ubicación reporte
+      debug:
+        msg: |
+          📄 Reporte FTP generado en servidor
+          📍 Ruta: C:\Temp\reporte-ftp-*.txt
+          {{ report_generation.stdout_lines[-1] }}
+
+    - name: ✅ 7. FINALIZACIÓN
+      debug:
+        msg: |
+          ✅ MANTENIMIENTO FTP SERVER COMPLETADO
+          
+          Servidor: {{ inventory_hostname }}
+          IP: 192.168.0.36
+          
+          Tareas ejecutadas:
+          • ✅ Verificación del sistema
+          • ✅ Análisis de espacio en discos  
+          • ✅ Búsqueda de directorios backup
+          • ✅ Limpieza de archivos temporales
+          • ✅ Verificación de servicios
+          • ✅ Generación de reporte local
+          
+          Estado: SISTEMA OPERATIVO
+          Próxima ejecución recomendada: Semanal

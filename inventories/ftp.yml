@@ -1,0 +1,28 @@
+# Inventario para Servidor FTP Windows 2016 - Oliver Backups
+# WinRM configurado y funcionando
+
+all:
+  hosts:
+    oliftp-windows:
+      ansible_host: 192.168.0.36
+      ansible_user: administrador
+      ansible_password: "{{ ftp_winrm_password }}"
+      ansible_connection: winrm
+      ansible_winrm_transport: basic
+      ansible_winrm_port: 5985
+      ansible_winrm_scheme: http
+      ansible_winrm_server_cert_validation: ignore
+      ansible_winrm_operation_timeout_sec: 60
+      
+      # Metadatos
+      server_name: "Oliver FTP Backup Server"
+      server_os: "Windows Server 2016 Standard"
+      server_purpose: "Almacena backups realizados en Cobian"
+      server_location: "onprem"
+      server_type: "baremetal"
+      
+  vars:
+    # Configuraciones de mantenimiento
+    backup_retention_days: 90
+    temp_cleanup_days: 30
+    log_cleanup_days: 14
