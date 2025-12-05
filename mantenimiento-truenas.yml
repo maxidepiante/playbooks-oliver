@@ -1,6 +1,6 @@
 ---
 - name: 🛠️ Mantenimiento Automático - TrueNAS Scale Backup Server
-  hosts: truenas_servers  # Grupo específico para TrueNAS
+  hosts: truenas_servers
   gather_facts: yes
   become: yes
 
@@ -31,10 +31,9 @@
 
     - name: 🧹 Limpiar logs antiguos (7+ días)
       shell: |
-        find /var/log -name "*.log" -type f -mtime +7 -delete
+        find /var/log -name "*.log" -type f -mtime +7 -delete 2>/dev/null || true
         echo "Logs antiguos limpiados"
-      args:
-        warn: no
+      changed_when: false
 
     - name: 🔄 Verificar servicios críticos
       systemd:
