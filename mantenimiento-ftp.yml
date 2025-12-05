@@ -153,7 +153,7 @@
                   @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}
         
         # Generar reporte
-        $report = @"
+        $reportContent = @"
 REPORTE MANTENIMIENTO FTP SERVER
 Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 Servidor: $computerName
@@ -178,7 +178,7 @@ RECOMENDACIONES
 Reporte generado automáticamente por Ansible Semaphore
 "@
         
-        $report | Out-File -FilePath $reportPath -Encoding UTF8
+        $reportContent | Out-File -FilePath $reportPath -Encoding UTF8
         Write-Output "Reporte generado en: $reportPath"
       register: report_generation
       changed_when: false
