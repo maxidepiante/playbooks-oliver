@@ -10,6 +10,7 @@
     - name: 2. INFORMACIÓN DEL SISTEMA
       win_command: systeminfo
       register: system_info
+      check_mode: no  # Ejecutar incluso en modo check
 
     - name: Mostrar información básica
       debug:
@@ -27,10 +28,11 @@
           @{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}},
           @{Name="TotalGB";Expression={[math]::Round(($_.Used + $_.Free)/1GB,2)}}
       register: disk_analysis
+      check_mode: no  # Ejecutar incluso en modo check
 
     - name: Mostrar estado discos
       debug:
-        msg: "{{ disk_analysis.stdout }}"
+        msg: "{{ disk_analysis.stdout | default('Información no disponible en modo check') }}"
 
     - name: 4. BUSCAR DIRECTORIOS BACKUP
       win_shell: |
@@ -50,10 +52,11 @@
         }
       register: backup_search
       changed_when: false
+      check_mode: no  # Ejecutar incluso en modo check
 
     - name: Mostrar resultados búsqueda
       debug:
-        msg: "{{ backup_search.stdout }}"
+        msg: "{{ backup_search.stdout | default('Búsqueda no ejecutada en modo check') }}"
 
     - name: 5. LIMPIEZA TEMPORALES
       win_shell: |
@@ -75,7 +78,7 @@
 
     - name: Mostrar resultado limpieza
       debug:
-        msg: "{{ temp_cleanup.stdout }}"
+        msg: "{{ temp_cleanup.stdout | default('Limpieza no ejecutada en modo check') }}"
 
     - name: 6. VERIFICAR SERVICIOS
       win_shell: |
@@ -88,10 +91,11 @@
         }
       register: service_check
       changed_when: false
+      check_mode: no  # Ejecutar incluso en modo check
 
     - name: Mostrar estado servicios
       debug:
-        msg: "{{ service_check.stdout }}"
+        msg: "{{ service_check.stdout | default('Verificación no ejecutada en modo check') }}"
 
     - name: 7. CREAR REPORTE SIMPLE
       win_shell: |
@@ -101,11 +105,87 @@
         Write-Output "Reporte creado: $report"
       register: create_report
       changed_when: false
+      check_mode: no  # Ejecutar incluso en modo check
 
     - name: Mostrar ubicación reporte
       debug:
-        msg: "Reporte creado en C:\\Temp\\ftp-report.txt"  # CORREGIDO: barras escapadas
+        msg: "Reporte creado en C:\\Temp\\ftp-report.txt"
 
-    - name: 8. FINALIZACIÓN
+    - name: 8. BUSCAR E INSTALAR ACTUALIZACIONES WINDOWS (SIN REINICIAR)
+      win_shell: |
+        Write-Output "=== GESTIÓN DE ACTUALIZACIONES WINDOWS ==="
+        
+        # Verificar si el módulo PSWindowsUpdate está instalado
+        $moduleCheck = Get-Module -ListAvailable -Name PSWindowsUpdate
+        if (-not $moduleCheck) {
+          Write-Output "🔧 Instalando módulo PSWindowsUpdate..."
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+          Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -AllowClobber
+          Import-Module PSWindowsUpdate
+          Write-Output "✅ Módulo instalado"
+        }
+        
+        # Buscar actualizaciones
+        Write-Output "🔍 Buscando actualizaciones..."
+        $updates = Get-WindowsUpdate -MicrosoftUpdate -NotCategory "Drivers" -NotTitle "*Preview*" -AcceptAll -IgnoreReboot -ErrorAction SilentlyContinue
+        
+        if ($updates.Count -gt 0) {
+          Write-Output "📥 Encontradas $($updates.Count) actualizaciones:"
+          $updates | Select-Object -First 10 Title, KB, Size | Format-Table -AutoSize
+          
+          # Instalar actualizaciones sin reiniciar
+          Write-Output "⬇️  Instalando actualizaciones (sin reiniciar)..."
+          $installResult = Install-WindowsUpdate -MicrosoftUpdate -NotCategory "Drivers" -AcceptAll -IgnoreReboot -AutoReboot:$false
+          
+          if ($installResult.Result -contains "Installed") {
+            Write-Output "✅ Actualizaciones instaladas correctamente"
+            Write-Output "⚠️  ATENCIÓN: El servidor necesita reinicio para completar la instalación"
+            Write-Output "   Acciones pendientes después del reinicio:"
+            Write-Output "   1. Acceder al servidor vía RDP"
+            Write-Output "   2. Programar reinicio para horario de mantenimiento"
+            Write-Output "   3. Verificar que todos los servicios se reinicien correctamente"
+          } else {
+            Write-Output "ℹ️  No se instalaron nuevas actualizaciones"
+          }
+        } else {
+          Write-Output "✅ Sistema actualizado - No hay nuevas actualizaciones"
+        }
+      register: windows_updates
+      changed_when: "windows_updates.stdout is search('Actualizaciones instaladas|ATENCIÓN')"
+      check_mode: no  # Ejecutar incluso en modo check
+      
+    - name: Mostrar resultado actualizaciones
       debug:
-        msg: "Mantenimiento FTP completado exitosamente"
+        msg: "{{ windows_updates.stdout_lines | default('Actualizaciones no verificadas en modo check') }}"
+        
+    - name: 9. VERIFICAR ESTADO REINICIO PENDIENTE
+      win_shell: |
+        $rebootRequired = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
+        
+        if ($rebootRequired) {
+          Write-Output "🔴 REINICIO PENDIENTE: El servidor necesita reinicio para completar actualizaciones"
+          Write-Output "   Fecha/hora actual: $(Get-Date)"
+          Write-Output "   Acción requerida: Programar reinicio manual via RDP"
+          Write-Output "   Comando para reiniciar programado:"
+          Write-Output "     shutdown /r /t 300 /c 'Reinicio programado por mantenimiento Ansible'"
+        } else {
+          Write-Output "✅ No hay reinicio pendiente"
+        }
+      register: reboot_check
+      changed_when: false
+      check_mode: no  # Ejecutar incluso en modo check
+      
+    - name: Mostrar estado de reinicio
+      debug:
+        msg: "{{ reboot_check.stdout | default('Estado reinicio no verificado en modo check') }}"
+
+    - name: 10. FINALIZACIÓN
+      debug:
+        msg: |
+          ✅ Mantenimiento FTP completado exitosamente
+          📊 Resumen ejecución:
+          - Servidor: {{ inventory_hostname }}
+          - Fecha: {{ ansible_date_time.date }}
+          - Espacio disco D: {{ 'Verificar' if disk_analysis is defined and disk_analysis.stdout is defined and 'D' in disk_analysis.stdout else 'Info no disponible' }}
+          - Actualizaciones: {{ 'Verificado' if windows_updates is defined and windows_updates.stdout is defined else 'No verificado' }}
+          - Reinicio: {{ 'Verificado' if reboot_check is defined and reboot_check.stdout is defined else 'No verificado' }}
