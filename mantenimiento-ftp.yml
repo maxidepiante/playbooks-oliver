@@ -19,7 +19,7 @@
 
     - name: 💿 2. ANÁLISIS DE DISCOS
       win_shell: |
-        Write-Output "=== ANÁLISIS DE DISCOS ==="
+        Write-Output "ANÁLISIS DE DISCOS"
         Get-PSDrive -PSProvider FileSystem | 
         Select-Object Name,
           @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}},
@@ -33,7 +33,7 @@
 
     - name: 🔍 3. BUSCAR DIRECTORIOS DE BACKUP
       win_shell: |
-        Write-Output "=== BUSQUEDA DE DIRECTORIOS BACKUP ==="
+        Write-Output "BUSQUEDA DE DIRECTORIOS BACKUP"
         
         # Buscar en todos los discos
         $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
@@ -52,12 +52,12 @@
         }
         
         if ($foundBackups.Count -gt 0) {
-          Write-Output "✅ Directorios de backup encontrados:"
+          Write-Output "Directorios de backup encontrados:"
           foreach ($dir in $foundBackups) {
-            Write-Output "   • $($dir.FullName)"
+            Write-Output "   $($dir.FullName)"
           }
         } else {
-          Write-Output "ℹ️ No se encontraron directorios con nombres de backup"
+          Write-Output "No se encontraron directorios con nombres de backup"
           Write-Output "Directorios en raíz de discos:"
           foreach ($drive in $drives) {
             if (Test-Path $drive) {
@@ -78,7 +78,7 @@
 
     - name: 🧹 4. LIMPIEZA DE ARCHIVOS TEMPORALES
       win_shell: |
-        Write-Output "=== LIMPIEZA DE ARCHIVOS TEMPORALES ==="
+        Write-Output "LIMPIEZA DE ARCHIVOS TEMPORALES"
         
         $tempPaths = @(
           "C:\Windows\Temp",
@@ -104,7 +104,7 @@
           }
         }
         
-        Write-Output "✅ Total: $totalDeleted archivos limpiados ($totalFreedMB MB liberados)"
+        Write-Output "Total: $totalDeleted archivos limpiados ($totalFreedMB MB liberados)"
       register: temp_cleanup
       changed_when: "temp_cleanup.stdout is search('archivos limpiados')"
 
@@ -114,7 +114,7 @@
 
     - name: 🔧 5. VERIFICACIÓN DE SERVICIOS CRÍTICOS
       win_shell: |
-        Write-Output "=== VERIFICACIÓN DE SERVICIOS ==="
+        Write-Output "VERIFICACIÓN DE SERVICIOS"
         
         # Servicios esenciales de Windows
         $services = @(
@@ -129,7 +129,7 @@
         foreach ($svc in $services) {
           $status = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
           if ($status) {
-            $icon = if ($status.Status -eq "Running") { "✅" } else { "⚠️" }
+            $icon = if ($status.Status -eq "Running") { "OK" } else { "WARNING" }
             Write-Output "$icon $($svc.Name) : $($status.Status)"
           }
         }
@@ -153,57 +153,55 @@
                   @{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}}
         
         # Generar reporte
-        @"
-=== REPORTE MANTENIMIENTO FTP SERVER ===
+        $report = @"
+REPORTE MANTENIMIENTO FTP SERVER
 Fecha: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 Servidor: $computerName
 IP: 192.168.0.36
 Sistema: Windows Server 2016 Standard
 
-=== ESTADO DEL SISTEMA ===
+ESTADO DEL SISTEMA
 Discos disponibles:
 $($disks | Format-Table | Out-String)
 
-=== MANTENIMIENTO EJECUTADO ===
+MANTENIMIENTO EJECUTADO
 - Análisis de espacio en discos
 - Búsqueda de directorios de backup
 - Limpieza de archivos temporales (>{{ temp_cleanup_days }} días)
 - Verificación de servicios críticos
 
-=== RECOMENDACIONES ===
+RECOMENDACIONES
 1. Monitorear espacio libre regularmente
 2. Verificar backups automáticos de Cobian
 3. Revisar logs del sistema periódicamente
 
 Reporte generado automáticamente por Ansible Semaphore
-"@ | Out-File -FilePath $reportPath -Encoding UTF8
+"@
         
-        Write-Output "📄 Reporte generado en: $reportPath"
+        $report | Out-File -FilePath $reportPath -Encoding UTF8
+        Write-Output "Reporte generado en: $reportPath"
       register: report_generation
       changed_when: false
 
     - name: 📋 Mostrar ubicación reporte
       debug:
-        msg: |
-          📄 Reporte FTP generado en servidor
-          📍 Ruta: C:\Temp\reporte-ftp-*.txt
-          {{ report_generation.stdout_lines[-1] }}
+        msg: "Reporte FTP generado en servidor - Ruta: C:\Temp\reporte-ftp-*.txt"
 
     - name: ✅ 7. FINALIZACIÓN
       debug:
         msg: |
-          ✅ MANTENIMIENTO FTP SERVER COMPLETADO
+          MANTENIMIENTO FTP SERVER COMPLETADO
           
           Servidor: {{ inventory_hostname }}
           IP: 192.168.0.36
           
           Tareas ejecutadas:
-          • ✅ Verificación del sistema
-          • ✅ Análisis de espacio en discos  
-          • ✅ Búsqueda de directorios backup
-          • ✅ Limpieza de archivos temporales
-          • ✅ Verificación de servicios
-          • ✅ Generación de reporte local
+          • Verificación del sistema
+          • Análisis de espacio en discos  
+          • Búsqueda de directorios backup
+          • Limpieza de archivos temporales
+          • Verificación de servicios
+          • Generación de reporte local
           
           Estado: SISTEMA OPERATIVO
           Próxima ejecución recomendada: Semanal
