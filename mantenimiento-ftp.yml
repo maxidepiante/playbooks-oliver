@@ -1,7 +1,7 @@
 ---
 - name: 🛠️ Mantenimiento Servidor FTP Windows 2016
   hosts: oliftp-windows
-  gather_facts: no
+  gather_facts: yes
 
   tasks:
     - name: 1. PRUEBA DE CONEXIÓN
@@ -104,9 +104,7 @@
 
     - name: Mostrar ubicación reporte
       debug:
-        msg: | 
-          Reporte creado en C:\Temp\ftp-report.txt
-          Puedes acceder directamente al servidor para verlo.
+        msg: "Reporte creado en C:\\Temp\\ftp-report.txt"  # CORREGIDO: barras escapadas
 
     - name: 8. FINALIZACIÓN
       debug:
