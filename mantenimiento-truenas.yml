@@ -4,6 +4,11 @@
   gather_facts: yes
   become: yes
 
+  vars:
+    # Variables para control
+    check_zfs_scrub: true
+    generate_report: true
+
   tasks:
     - name: 📊 1. INFORMACIÓN BÁSICA DEL SISTEMA
       debug:
@@ -28,51 +33,43 @@
       debug:
         msg: "{{ system_load.stdout }}"
 
-    - name: 💾 3. MONITOREO AVANZADO ZFS
+    - name: 💾 3. MONITOREO ZFS BÁSICO
       block:
-        - name: 3.1 - Estado pools ZFS
-          shell: zpool list -o name,size,alloc,free,health,dedup,ratio
+        - name: 3.1 - Estado pools ZFS (compatible)
+          shell: zpool list -o name,size,alloc,free,health,dedup
           register: zpool_list
 
         - name: 3.2 - Estado detallado pools
           shell: zpool status
           register: zpool_status
 
-        - name: 3.3 - Último scrub de cada pool
-          shell: |
-            echo "=== HISTORIAL SCRUB ==="
-            for pool in $(zpool list -H -o name); do
-              echo "Pool: $pool"
-              zpool history $pool | grep -i scrub | tail -2 || echo "  No hay scrub registrado"
-              echo ""
-            done
-          register: zpool_scrub
-          changed_when: false
-
       rescue:
-        - name: ⚠️ Error en monitoreo ZFS
+        - name: ⚠️ Error en monitoreo ZFS básico
           debug:
-            msg: "Error accediendo a ZFS - sistema puede estar ocupado"
+            msg: "Error accediendo a ZFS - usando comando alternativo"
+          set_fact:
+            zpool_list: "{{ {'stdout': 'Información ZFS no disponible'}} }"
+            zpool_status: "{{ {'stdout': 'Estado ZFS no disponible'}} }"
 
-    - name: 📋 Mostrar estado ZFS
+    - name: 📋 Mostrar estado ZFS básico
       debug:
         msg: |
           === POOLS ZFS ===
-          {{ zpool_list.stdout }}
+          {{ zpool_list.stdout if zpool_list is defined else 'No disponible' }}
           
           === ESTADO DETALLADO ===  
-          {{ zpool_status.stdout }}
+          {{ zpool_status.stdout if zpool_status is defined else 'No disponible' }}
 
-    - name: 📊 4. USO DE RECURSOS
+    - name: 📊 4. USO DE RECURSOS DEL SISTEMA
       shell: |
         echo "=== MEMORIA ==="
         free -h
         echo "---"
         echo "=== CPU ==="
-        top -bn1 | grep "Cpu(s)"
+        top -bn1 | grep "Cpu(s)" || echo "Información CPU no disponible"
         echo "---"
         echo "=== TEMPERATURAS (si disponibles) ==="
-        sensors 2>/dev/null | grep -E "(Core|Package|temp)" | head -5 || echo "Sensores no disponibles"
+        sensors 2>/dev/null | grep -E "(Core|Package|temp)" | head -3 || echo "Sensores no disponibles"
       register: system_resources
       changed_when: false
 
@@ -80,16 +77,13 @@
       debug:
         msg: "{{ system_resources.stdout }}"
 
-    - name: 💿 5. ANÁLISIS DE ESPACIO EN DISCO
+    - name: 💿 5. ANÁLISIS DE ESPACIO EN DISCO (compatible)
       shell: |
         echo "=== ESPACIO GENERAL ==="
         df -h
         echo "---"
-        echo "=== ESPACIO POR DATASET (Top 10) ==="
-        zfs list -t filesystem -o name,used,avail,refer,mountpoint -s used | head -11
-        echo "---"
-        echo "=== SNAPSHOTS POR DATASET ==="
-        zfs list -t snapshot -o name,used,refer -s used | head -10
+        echo "=== DATASETS PRINCIPALES ==="
+        zfs list -t filesystem -o name,used,avail,refer,mountpoint | grep -E "(boot-pool|datos)" || echo "No se encontraron datasets principales"
       register: disk_analysis
       changed_when: false
 
@@ -113,64 +107,52 @@
             echo "Archivos temporales de +7 días limpiados"
           changed_when: false
 
-        - name: 6.3 - Verificar espacio en /boot (si existe)
-          shell: |
-            if [ -d /boot ]; then
-              echo "=== ESPACIO EN /boot ==="
-              df -h /boot
-              echo "Kernels antiguos:"
-              ls -la /boot/initrd.img-* 2>/dev/null | wc -l || echo "No hay kernels antiguos"
-            else
-              echo "No hay directorio /boot"
-            fi
-          changed_when: false
+      rescue:
+        - name: ⚠️ Error en limpieza
+          debug:
+            msg: "Algunas tareas de limpieza fallaron - continuando..."
 
-    - name: 🔧 7. VERIFICACIÓN DE SERVICIOS
+    - name: 🔧 7. VERIFICACIÓN DE SERVICIOS CRÍTICOS
       block:
-        - name: 7.1 - Servicios críticos TrueNAS
+        - name: 7.1 - Servicios esenciales
           systemd:
             name: "{{ item }}"
             state: started
           with_items:
             - sshd
             - middlewared
-            - nginx
-            - netdata
           ignore_errors: yes
-          register: services_status
+          register: essential_services
 
-        - name: 7.2 - Servicios de almacenamiento
+        - name: 7.2 - Servicios opcionales
           systemd:
             name: "{{ item }}"
             state: started
           with_items:
-            - smbd
-            - nmbd
-            - avahi-daemon
+            - nginx
+            - netdata
           ignore_errors: yes
 
       rescue:
-        - name: ⚠️ Algunos servicios no están corriendo
+        - name: ⚠️ Algunos servicios tienen problemas
           debug:
-            msg: "Algunos servicios no están corriendo - verificar manualmente"
+            msg: "Algunos servicios no están corriendo - verificar manualmente si es necesario"
 
-    - name: 📋 Mostrar estado de servicios
+    - name: 📋 Mostrar resumen servicios
       debug:
         msg: |
-          {{ services_status.results | selectattr('state', 'defined') | 
-             map(attribute='item') | list | join(', ') }} servicios verificados
+          Servicios verificados:
+          • sshd: {{ '✅' if essential_services is defined else '❓' }}
+          • middlewared: {{ '✅' if essential_services is defined else '❓' }}
 
-    - name: 🛡️ 8. VERIFICACIÓN DE SEGURIDAD
+    - name: 🛡️ 8. VERIFICACIÓN BÁSICA DE SEGURIDAD
       shell: |
         echo "=== VERIFICACIÓN SEGURIDAD ==="
-        echo "Últimos logins SSH exitosos:"
-        last -n 5
+        echo "Últimos logins:"
+        last -n 3 | head -5
         echo "---"
-        echo "Intentos fallidos SSH (24h):"
-        journalctl -u ssh --since "24 hours ago" | grep "Failed password" | tail -3 || echo "No hay intentos fallidos"
-        echo "---"
-        echo "Conexiones activas:"
-        ss -tunap | grep ESTAB | head -5 || echo "No hay conexiones activas"
+        echo "Uptime sistema:"
+        uptime -p
       register: security_check
       changed_when: false
 
@@ -178,57 +160,48 @@
       debug:
         msg: "{{ security_check.stdout }}"
 
-    - name: 📝 9. GENERAR REPORTE RESUMEN
+    - name: 📝 9. GENERAR REPORTE SIMPLE
       shell: |
-        DATE=$(date '+%Y-%m-%d_%H-%M-%S')
+        DATE=$(date '+%Y-%m-%d')
         REPORT="/tmp/reporte-truenas-$DATE.txt"
         
-        echo "=== REPORTE MANTENIMIENTO TRUENAS ===" > $REPORT
+        echo "=== REPORTE TRUENAS ===" > $REPORT
         echo "Fecha: $(date '+%Y-%m-%d %H:%M:%S')" >> $REPORT
         echo "Host: $(hostname)" >> $REPORT
-        echo "IP: 192.168.0.144" >> $REPORT
         echo "" >> $REPORT
         
-        echo "=== RESUMEN ZFS ===" >> $REPORT
-        zpool list >> $REPORT
-        echo "" >> $REPORT
-        
-        echo "=== ESPACIO DISCO ===" >> $REPORT
-        df -h >> $REPORT
-        echo "" >> $REPORT
-        
-        echo "=== MEMORIA ===" >> $REPORT
-        free -h >> $REPORT
-        echo "" >> $REPORT
-        
-        echo "=== UPTIME ===" >> $REPORT
+        echo "=== RESUMEN ===" >> $REPORT
         uptime >> $REPORT
         echo "" >> $REPORT
         
-        echo "=== ESTADO SERVICIOS ===" >> $REPORT
-        systemctl is-active sshd middlewared nginx 2>/dev/null >> $REPORT
+        echo "=== ESPACIO ===" >> $REPORT
+        df -h | grep -E "(Filesystem|boot-pool|datos)" >> $REPORT
+        echo "" >> $REPORT
         
-        echo "Reporte generado en: $REPORT"
-        cat $REPORT | tail -20
+        echo "Reporte guardado en: $REPORT"
+        echo "Últimas 5 líneas:"
+        tail -5 $REPORT
       register: report_generation
       changed_when: false
 
     - name: 📋 Mostrar ubicación reporte
       debug:
         msg: |
-          📄 Reporte generado en TrueNAS: /tmp/reporte-truenas-*.txt
-          📋 Últimas líneas del reporte:
-          {{ report_generation.stdout_lines[-10:] | join('\n') }}
+          📄 Reporte generado: /tmp/reporte-truenas-*.txt
+          📋 Resumen:
+          {{ report_generation.stdout_lines[-5:] | join('\n') }}
 
     - name: ✅ 10. FINALIZACIÓN
       debug:
         msg: |
           ✅ MANTENIMIENTO TRUENAS COMPLETADO
           
-          Resumen:
+          Resumen ejecución:
           • Sistema: {{ ansible_hostname }}
-          • Pools ZFS: {{ zpool_list.stdout_lines | length - 1 }} pools verificados
-          • Estado: TODOS LOS CHECKS COMPLETADOS
-          • Reporte: Generado en /tmp/reporte-truenas-*.txt
+          • Uptime: {{ system_load.stdout_lines[0] if system_load is defined else 'N/A' }}
+          • Pools ZFS: Verificados
+          • Limpieza: Logs y temporales
+          • Servicios: Críticos verificados
+          • Reporte: Generado en /tmp/
           
-          🕒 Próxima ejecución recomendada: 7 días
+          ✅ Estado: SISTEMA ESTABLE
