@@ -1,0 +1,37 @@
+---
+- name: 🔍 Prueba Conexión WinRM FTP Server
+  hosts: oliftp-windows
+  gather_facts: no
+
+  tasks:
+    - name: 1. PRUEBA COMANDO SIMPLE
+      win_command: echo "Prueba WinRM exitosa"
+      register: test_result
+
+    - name: Mostrar resultado
+      debug:
+        msg: "{{ test_result.stdout }}"
+
+    - name: 2. VERIFICAR SISTEMA
+      win_command: systeminfo
+      register: system_info
+
+    - name: Mostrar información sistema
+      debug:
+        msg: |
+          Sistema: {{ (system_info.stdout_lines | select("match", "OS Name") | first) }}
+          Memoria: {{ (system_info.stdout_lines | select("match", "Total Physical Memory") | first) }}
+
+    - name: 3. VERIFICAR DISCOS
+      win_shell: |
+        Get-PSDrive -PSProvider FileSystem | 
+        Format-Table Name,@{Name="UsedGB";Expression={[math]::Round($_.Used/1GB,2)}},@{Name="FreeGB";Expression={[math]::Round($_.Free/1GB,2)}}
+      register: disk_info
+
+    - name: Mostrar discos
+      debug:
+        msg: "{{ disk_info.stdout }}"
+
+    - name: ✅ FINALIZACIÓN
+      debug:
+        msg: "✅ Prueba WinRM completada - Sistema accesible"
